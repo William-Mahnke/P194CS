@@ -1,0 +1,545 @@
+---
+title: "Final Project"
+output: html_document
+date: "2024-05-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(igraph)
+library(Matrix)
+library(igraphdata)
+library(jsonlite)
+library(tidyr)
+library(tibble)
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+## Final Project - Crocodile Data
+### 1 - Loading and preparing data
+
+Reading in the crocodile files (two csv's - one for edges and one for targets, one json about node features)
+```{r}
+# read in edge data 
+crocodile.edge.data <- read.table("./wikipedia/crocodile/musae_crocodile_edges.csv", sep = ',',  header = TRUE, stringsAsFactors = FALSE)
+
+# the indexing of the nodes starts with 0 so to change to an igraph object we shifted the indexing of the nodes by one
+crocodile.edgelist <- matrix(unlist(crocodile.edge.data), ncol = 2) + 1
+```
+
+Converting the edge list into an adjacency matrix
+```{r, echo = TRUE, eval = TRUE}
+# converting edge list matrix to igraph object
+crocodile.igraph <- graph_from_edgelist((crocodile.edgelist))
+
+# the source of the data says the graph is un-directed 
+crocodile.igraph <- as.undirected(crocodile.igraph)
+
+# create the adjacency matrix for the network 
+crocodile.adjacency <- as_adj(crocodile.igraph)
+image(Matrix(crocodile.adjacency))
+```
+
+Reading in target data, number represents the traffic
+```{r}
+# read in target data 
+crocodile.target.data <- read.table("./wikipedia/crocodile/musae_crocodile_target.csv",
+                                     sep = ',',
+                                     header = TRUE,
+                                     stringsAsFactors = TRUE)
+```
+
+Adding target data as node attribute to igraph object
+```{r}
+# add one so indices line up with node values
+crocodile.target.data$id <- crocodile.target.data$id + 1
+
+# add target values as node attributes
+V(crocodile.igraph)$target <- crocodile.target.data$target
+```
+
+Adding name as node feature to incorporate JSON file
+```{r}
+# adding name as another node attribute
+V(crocodile.igraph)$name <- as.character(crocodile.target.data$id)
+```
+
+Reading in json file
+```{r}
+# reading in JSON file
+crocodile.features <- fromJSON("./wikipedia/crocodile/musae_crocodile_features.json")
+```
+
+Converting json file to tibble 
+```{r}
+# converting JSON file to tibble. data frame doesn't work since we're trying to store a list in our second column
+crocodile.features.df <- tibble::tibble(name = names(crocodile.features), 
+                                        value = crocodile.features)
+
+# change name to numeric values for sorting (sorting as characters would cause problems)
+crocodile.features.df$name <- as.numeric(crocodile.features.df$name) 
+```
+
+Reorganizing rows of tibble to read into igraph object as node attribute
+```{r}
+# organizing rows based on index 
+crocodile.features.df <- crocodile.features.df %>% arrange(name)
+
+# add nouns as node attribute 
+V(crocodile.igraph)$nouns <- crocodile.features.df$value
+```
+
+### 2 - Generating induced subgraphs
+
+Generating subgraphs
+```{r}
+set.seed(17)
+
+sub.network <- induced_subgraph(crocodile.igraph, sample(V(crocodile.igraph), 200))
+```
+
+### 3 - Visualizing the Subnetwork
+
+```{r}
+def_marg <- c(5.1, 4.1, 4.1, 2.1)
+
+no_marg <- c(0, 0, 0, 0)
+```
+
+```{r}
+plot(sub.network,
+     vertex.color = 'grey',
+     vertex.label.cex = 0.5,
+     vertex.label.color = 'black',
+     edge.color = "blue")
+```
+
+A "basic" plot for the sub-network looks incredibly clunky. It's hard to see any edges because the vertices are too big which makes it hard to get see any relationships between the nodes. The metrics we found later also told us that a significant proportion of the nodes have degree 0. To make the visualization easier, we removed the nodes with degree zero and organized the nodes in a ring using `layout = layout_in_circle` . We also removed the loops for particular nodes for a cleaner visualization.
+
+```{r}
+# create subgraph with nodes with degree > 0
+temp <- subgraph(sub.network, degree(sub.network) > 0)
+temp <- simplify(temp)
+
+# Plot the graph
+plot(temp,
+     layout = layout_in_circle,
+     vertex.size = 10,
+     vertex.label.cex = 0.5,
+     vertex.color = 'grey',
+     edge.color = 'blue')
+```
+
+Taking out the nodes with degree zero left  only 75. The circular layout shows there are a few nodes that are much more popular than most, which we analyze further in community detection and network metrics. The final step to creating a meaningful visualization is incorporating our target data and noun list. To utilize this data, we'll uses different shades of a color to distinguish the target data between nodes and use edges to show which nodes share a particular amount of nouns.
+
+```{r}
+# coloring edges based off whether nodes share nouns
+E(temp)$color <- 'red'
+
+for(i in seq(from=1, to=length(E(temp)), by=1)){
+h <- ends(temp, E(temp)[i])[1]
+k <- ends(temp, E(temp)[i])[2]
+E(temp)[i]$color <-      ifelse(length(intersect(V(temp)[[h]]$nouns,V(temp)[[k]]$nouns)) > 2, 'forestgreen', 'red')
+}
+
+# coloring vertices based of the target data
+V(temp)$color <- 'gray'
+
+recolor.using.target <- function(network){
+for(i in seq(from = 1, to = length(network), by = 1)){
+  if((V(network)[[i]]$target) < 100){
+    V(network)[[i]]$color <- '#d67088'
+  }
+  else if((V(network)[[i]]$target) < 1000){
+    V(network)[i]$color <- '#c94161'
+  }
+  else if((V(network)[[i]]$target) < 10000){
+    V(network)[i]$color <- '#bc123a'
+  }
+  else if((V(network)[[i]]$target) < 100000){
+    V(network)[i]$color <- '#960e2e' 
+  }
+  else {
+    V(network)[i]$color <- '#890020'
+  }
+}
+  return(network)
+}
+
+temp.recolor <- recolor.using.target(temp)
+```
+
+Here we also changed the layout to `layout.sphere` to experiment in changing the layout. 
+
+```{r}
+plot(temp.recolor,
+     vertex.label.cex=0.3,
+     vertex.label.family="Helvetica",
+     edge.width=0.5,
+     edge.arrow.size=0.1,
+     layout=layout.sphere,
+     vertex.size=11)
+```
+
+The most popular node has very high traffic, but there doesn't appear to be a consistent pattern in the nodes with one degree. Additionally, most of the vertices connected together share more than two nouns. However, the presence of a connection where the nodes only share two words at most sparks intrigue.  
+
+Using the coloring of the edges, we can calculate the proportion of edges are between vertices that share more than two nouns. 
+
+```{r}
+noun_link_count <- sum(E(temp)$color == 'forestgreen')
+
+noun_fail_count <- sum(E(temp)$color == 'red')
+
+noun_link_count/length(E(temp))
+
+noun_fail_count/length(E(temp))
+```
+
+We can see that approximately 17% of the connections are between nodes than share either zero, one, or two nouns, and 83% of the connected pairs share three or more. Keeping the edge coloring the same, we can change the color of the nodes to depend on the number of nouns it has in its list. The implies that most of the connected articles, which are all connected to a central node, are referring to a few of the same ideas.  
+
+```{r}
+# coloring vertices based of the number of nouns
+V(temp)$color <- 'gray'
+
+recolor.using.nouns <- function(network){
+for(i in seq(from = 1, to = length(network), by = 1)){
+  if(length(V(network)[[i]]$nouns) < 15){
+    V(network)[[i]]$color <- 'green'
+  }
+  else if(length(V(network)[[i]]$nouns) < 35){
+    V(network)[i]$color <- 'green2'
+  }
+  else if(length(V(network)[[i]]$nouns) < 55){
+    V(network)[i]$color <- 'green3'
+  }
+  else if(length(V(network)[[i]]$nouns) < 75){
+    V(network)[i]$color <- 'green4' 
+  }
+  else {
+    V(network)[i]$color <- 'darkgreen'
+  }
+}
+  return(network)
+}
+
+temp.recolor <- recolor.using.nouns(temp)
+```
+
+```{r}
+plot(temp.recolor,
+     vertex.label.cex=0.3,
+     vertex.label.family="Helvetica",
+     edge.width=0.5,
+     edge.arrow.size=0.1,
+     layout=layout.circle,
+     vertex.size=11)
+```
+
+Much like the previous plot, there doesn't seem a pattern in noun list length when it comes to the connection of points to the popular node, which logically has a long list. It also seems that the vertices in the filtered sub-graph have long noun lists. 
+
+### 4 - Analyzing Network Metrics
+
+```{r}
+degree(temp) %>% table()
+
+edge_density(temp) # same as graph.density
+
+transitivity(temp)
+```
+
+The table for the degree of the nodes indicates that most of the nodes in the sub-network don't have any connections to other articles. The table shows  about 63 percent of the nodes don't have any other connection and all but three nodes have less than three connections. The distribution of degree indicates that apart from some pairs in the network, one particular node is at the center of most of the group. There are a couple of connections outside of this main group but most of the nodes in the network aren't connected to others. The density of the sub-network reflects how sparse the connections are. Most articles are related to or come from that most popular node and have very little to do with each other, which is supported by the incredibly low transitivity. 
+
+In the context of the network, the density and degree imply that a couple of pages out of the sub-network are the most important/general pages. Since the nodes corresponding to pages are anonymous, we have to infer that these popular pages are broad and serve as an outline for more specific topics, the nodes that are connected to that popular node. Nodes with no connections are likely articles that would come at the end of a long rabbit hole, nuanced material that's unrelated to anything else.
+
+```{r}
+mean_distance(sub.network) # same as average.path.length
+
+diameter(temp)
+```
+
+The average path length of the network is about two, which means that most of those paths go through just the popular node. The diameter being three reflects this much, but also indicates there are a few paths between nodes that have one extra node along with the most popular node. 
+
+The low average path length and diameter reflect the conclusions drawn from the networks density and nodes' degrees. The popular page serves as a connection between a bunch of other pages. The diameter being three implies that going between the two "farthest" pages requires one page on top of connecting through the main page.
+
+```{r}
+articulation_points(temp) # articulation points (number based off original network)
+
+max(length(V(temp)$nouns))
+
+max(betweenness(temp)) # highest betweenness centrality
+
+sqrt(var(betweenness(temp))) # std dev of betweenness centrality
+```
+
+The filtered network (temp) has six articulation points. Most of these can be traced back to the nodes that have the most connections, which is logically because they're the node holding a lot of others together. These articulation points represent crucial webpages that are likely important to understanding a sub-topic of crocodiles. 
+
+The large max betweenness centrality reflects ideas introduced previously about one popular node being the center for most of the filtered network. It acts as the middle man between a lot of vertice combinations so it would make sense for it to have that high betweenness centrality. The high standard deviation of betwenness centrality for the network indicates the most populat node (along with the few other main connectors of the network) have high betweenness centrality while the bulk of the nodes are going to a low betweenness centrality. 
+
+```{r}
+mean(V(temp)$target) # mean target value
+
+sqrt(var(V(temp)$target)) # std dev of target values
+```
+
+The average traffic for the nodes in the network is about 8800, which indicates that the network as a whole is getting a fair amount of traffic during the studied period of time. However, with a standard deviation of about 32000, there are a lot of nodes that are likely outliers in the amount of traffic they get (which is true considering the highest traffic is about 210000). 
+
+```{r}
+is_connected(temp)
+
+components(temp)
+```
+
+The results from investigating the density of the network imply the network isn't connected, and calling `components` reveals the big group of nodes connected to that most popular node with a bunch of smaller components of either the less popular nodes, the pairs, or the bulk of nodes (ones with degree 0) that are isolated.
+
+### 5 - Community Detection
+
+```{r}
+kc <- cluster_fast_greedy(temp)
+```
+
+```{r}
+length(kc)
+sizes(kc)
+modularity(kc)
+```
+
+`cluster_fast_greedy` produces 13 different communities, all but three having only three members or less. A modularity of 0.602 means the network is relatively strong, but also indicates there could be some articulation points holding those communities together, namely the more popular nodes found when exploring the network metrics.
+
+```{r}
+plot(kc, temp,
+     vertex.label.cex = 0.5,
+     vertex.size = 10)
+```
+
+The plot of the communities reflect the analysis from the modularity. Every community is held together by a most popular node, with the plot only having one inter-community edge. This supports the claim from the network metrics section that all of nodes connected to their respective popular node are likely subsections of that popular node. The one inter-community edge is an outlier, so we decided to investigate how many nouns the nodes share.
+
+```{r}
+communities <- cluster_fast_greedy(temp)
+
+# Get the community membership for each vertex
+membership <- membership(communities)
+
+# Initialize a vector to store the indices of edges connecting different communities
+inter_community_edges <- c()
+
+# Iterate over all edges
+for (edge in 1:ecount(temp)) {
+  # Get the vertices of the edge
+  vertices <- ends(temp, edge)
+  
+  # Check if the vertices belong to different communities
+  if (membership[vertices[1]] != membership[vertices[2]]) {
+    # If they belong to different communities, add the edge index to the list
+    inter_community_edges <- c(inter_community_edges, edge)
+  }
+}
+
+print(inter_community_edges)
+```
+
+The inter-community edge is edge 48. Using the edge number we can see how many nouns overlap.
+
+```{r}
+# E(temp)[48] : 8115--10438
+length(intersect(V(crocodile.igraph)[[8115]]$nouns,
+                 V(crocodile.igraph)[[10438]]$nouns))
+```
+
+The nodes (i.e. the webpages) between communities only share two words in common. Considering the length of some nodes' noun lists are much larget than that, we'll also investigate the proportion of vertices connected when they share a particular amount of nouns. We also decided to test `cluster_edge_betweenness` to see if there was a difference in the communities created.
+
+```{r}
+kc <- cluster_edge_betweenness(temp)
+```
+
+```{r}
+length(kc)
+sizes(kc)
+modularity(kc)
+```
+
+```{r}
+plot(kc, temp,
+     vertex.label.cex = 0.5,
+     vertex.size = 10)
+```
+
+It appears that using `cluster_edge_betweenness` gave the same communities as `clutster_fast_greedy`, which speaks to the importance of particular popular nodes in the network. 
+
+#### Analyzing Edges and Nouns Shared 
+
+Investigating the shared nouns between the only two inter-community nodes prompted us to investigate whether the number of nouns shared between nodes is indicative of whether the nodes are connected. Our thinking was that if two webpages share similar key words or ideas there's a higher chance they would be connected. Using a combination table of every possible vertices pair in the network. We calculated the percentage of connections made between pairs with varying levels of nouns shared.
+
+```{r}
+# table to represent every vertex combination in the temp network
+combo_table <- t(combn(seq(from = 1, to = length(V(temp))), 2))
+
+length(combo_table[,1])
+
+# using dimensions of combo_table to add data 
+empty_df <- data.frame(combo_table)
+
+# function to count number of shared nouns
+intersect_add <- function(df){
+  end_list <- vector("list", length(combo_table[,1]))
+  end_list <- lapply(end_list, function(x) c(0))
+  for(i in seq(from = 1, to = length(combo_table[,1]), by = 1)){
+    vec <- df[i,]
+    l <- vec[[1]]
+    m <- vec[[2]]
+    intersect_want <- intersect(V(temp)[[l]]$nouns, V(temp)[[m]]$nouns)
+    wanted <- length(intersect_want)
+    if(wanted > 0){
+    end_list[i] <- wanted}
+  }
+  return(end_list)
+}
+
+total_list <- intersect_add(empty_df)
+
+total_vec <- unlist(total_list)
+
+empty_df$intersect_count <- total_vec
+
+# function to check whether vertices are connected
+check_edge <- function(df){
+  end_list <- vector("list", length(combo_table[,1]))
+  end_list <- lapply(end_list, function(x) c(0))
+  for(i in seq(from = 1, to = length(combo_table[,1]), by = 1)){
+    vec <- df[i,]
+    l <- vec[[1]]
+    m <- vec[[2]]
+    if(are_adjacent(temp, V(temp)[l], V(temp)[m]) == TRUE){
+      end_list[i] = 1
+    }
+  }
+  return(end_list)
+}
+
+yes.no_list <- check_edge(empty_df)
+
+yes.no_vec <- unlist(yes.no_list)
+
+empty_df$edge_exist <- yes.no_vec
+
+table(empty_df$intersect_count) # missing 41, 44, 45
+```
+
+The table the distribution of the nouns shared by pairs of vertices in the network. We can see that a bulk of the pairs have less than five nouns in common, but there are a significant number of pairs for higher numbers of nouns shared too, going all the way up to 46 (with 41, 44, and 45 missing). Since the network is low density, these percentages will likely be low. But the percentages relative to each other should indicate any relationship in nouns shared.
+
+```{r}
+thing <- seq(from = 0, to = max(empty_df$intersect_count), by = 1)
+matrix_thing <- c(thing, rep(0, length(thing)))
+
+percents_matrix <- matrix(matrix_thing, nrow = length(thing), ncol = 2)
+
+totals_create <- function(df){
+  empty_vec <- rep(0, length(thing))
+  for(i in seq(from = 0, to = length(thing) - 1, by = 1)){
+    counter = 0
+    for(j in seq(from = 1, to = length(df$intersect_count))){
+      if(df$intersect_count[j] == i){
+        counter = counter + 1
+      }
+    }
+    empty_vec[i+1] = counter
+  }
+  return(empty_vec)
+}
+
+edge_share_totals <- totals_create(empty_df)
+
+percents_matrix[, 2] <- edge_share_totals
+```
+
+```{r}
+edge_create <- function(df){
+  empty_vec <- rep(0, length(thing))
+  for(i in seq(from = 0, to = length(thing) - 1, by = 1)){
+    counter = 0
+    for(j in seq(from = 1, to = length(df$intersect_count))){
+      if(df$intersect_count[j] == i){
+        if(df$edge_exist[j] == 1)
+          {counter = counter + 1}
+      }
+    }
+    empty_vec[i+1] = counter
+  }
+  return(empty_vec)
+}
+
+edge_truth_total <- edge_create(empty_df)
+percents_matrix <- cbind(percents_matrix, edge_truth_total)
+ratio <- edge_truth_total/edge_share_totals
+percents_matrix <- cbind(percents_matrix, ratio)
+colnames(percents_matrix)[1] <- 'Amount of Shared Nouns'
+colnames(percents_matrix)[2] <- 'Vertice Combinations'
+colnames(percents_matrix)[3] <- 'Num of Edges'
+```
+
+Plotting percentages for nouns shared
+```{r}
+percents_matrix_to_graph <- na.omit(percents_matrix)
+df_to_graph <- percents_matrix_to_graph[,c(1,4)] %>% as.data.frame()
+df_to_graph <- df_to_graph %>% subset(ratio > 0)
+
+ggplot(df_to_graph, aes(x = `Amount of Shared Nouns`, y = `ratio`)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Nouns Shared", y = "Percent of Possible Edges") +
+  ggtitle("Ratio of Edges between Vertices with Nouns Shared") + 
+  scale_x_continuous(n.breaks = 13, limits = c(0,12))
+```
+
+The barplot shows all of the nonzero percentages for nouns shared (note 9 and 10 do have a percentage of 0 but were left in by the design of our visual). The barplot shows that the highest percentage of a link occurs when two webpages share five nouns with other amounts of nouns in common share similar, but slightly smaller percentages. This, combined with the low density of the network, indicates that sharing nouns with another webpage can boost the chances of there being a connection but that the link is solely based off of this comparison. 
+
+### 6 & 7 - Reordering Adjacency Matrix
+
+```{r}
+temp.adj.matrix <- as.matrix(as_adjacency_matrix(temp))
+image(Matrix(temp.adj.matrix))
+```
+
+The basic adjacency matrix for the filtered network doesn't show any particular patterns, it's easier to see from the visual which nodes have the most connections, but we also experimented with reordering the nodes in the matrix based on communities, target data, and degree.
+
+```{r}
+temp.community <- cluster_fast_greedy(temp)  # whatever community detection algorithm you prefer can be used here
+temp.membership <- membership(temp.community)  # obtain numeric vector consisting of all group memberships (maps 1, 2, 3, etc. to unique groups)
+temp.sorted <- order(temp.membership)  # sorts vertices based on group membership
+
+# adjacency matrix construction
+temp.adj.matrix <- as.matrix(as_adjacency_matrix(temp))
+temp.sorted.adj <- temp.adj.matrix[temp.sorted, temp.sorted]
+image(Matrix(temp.sorted.adj))
+```
+
+The matrix organized for communities shows the communities centered around a particular popular node. The ordering of the communities also shows the drop off in size of the communities to the bottom right corner which is effectively isolated nodes. 
+
+```{r}
+# For degree:
+temp.degree <- degree(temp)
+temp.sorted <- order(temp.degree, decreasing = TRUE)
+temp.adj.matrix <- as.matrix(as_adjacency_matrix(temp))
+temp.sorted.adj <- temp.adj.matrix[temp.sorted, temp.sorted]
+image(Matrix(temp.sorted.adj))
+```
+
+Reordering the nodes based on degree doesn't share as much insight as the previous example. The visual shows all of the connections the most popular node has. The top left of the plot does show some slight denstiy between nodes with high degree, but the rest of the visual doesn't help as a bulk of the nodes have a degree of 1.
+
+```{r}
+# For target: 
+temp.target <-V(temp)$target
+temp.sorted <- order(V(temp)$target, decreasing = TRUE)
+temp.adj.matrix <- as.matrix(as_adjacency_matrix(temp))
+temp.sorted.adj <- temp.adj.matrix[temp.sorted, temp.sorted]
+image(Matrix(temp.sorted.adj))
+```
+
+Reordering the nodes based on target data reveals that the most popular node also has the highest traffic within the network. The next few places also seemed reserved for those popular nodes that were at the center of the smaller groups. Additionally, the bottom right corner shows a couple connections between the nodes with the lowest traffic. 
+
+### 8 - Summary
+
+The analysis from the previous sections implies that the crocodile network is largely dominated by popular nodes, with a majority of nodes only having one connection to a particular popular node if they have any at all. The sparsity of the network indicates these hubs centered around the popular nodes define communities within the network, with few inter-community connections. Investigating a filtered network, we found there wasn't a strong correlation between the number of nouns shared between webpages and whether or not the pages were connected. Most of the nodes share a few nouns together and the percentage of links drops off as the threshold for nouns in common increases, which suggests that all of the connected webpages have a few keyword nouns in common. However, the analysis from community detection also suggested that webpages that share a lot of keyword nouns don't necessarily link to each other. The results from this analysis suggest further study into the network or its attributes to come up with a better common quality between vertices that are connected. 

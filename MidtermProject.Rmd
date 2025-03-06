@@ -1,0 +1,172 @@
+---
+title: "Midterm Project"
+author: "William Mahnke"
+subtitle: Generating Random Variables using different techniques
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Inverse Transform Method 
+
+Like Maria L. Rizzo says, the inverse transform method relies on a theorem:
+
+$$
+\text{If } X \text{ is a continuous random variable with cdf } F_X(x), \text{ then } U = F_X(X) \sim \text{Unif}(0,1)
+$$
+
+The first two steps are deriving and creating the inverse cdf function for x, $F_X^{-1}(u)$. Then using random sampled values from $U \sim \text{Unif}(0,1)$, we can calculate values for x using $F_X^{-1}(u)$. 
+
+I chose to sample points from the exponential power distribution. I wanted to try the method on a continuous random variable and also wanted a distribution similar to something we've worked with in class but different enough to warrant using the method. Additionally, intuition from the exponential distribution helped me verify the method worked. 
+
+The general pdf for the distribution with parameters $\lambda$ and $\kappa$ is:
+
+$$
+f(x) = \left(e^{1-e^{\lambda x^{\kappa}}}\right)e^{\lambda x^{\kappa}}\lambda\kappa x^{\kappa - 1}, x > 0
+$$
+
+The general cdf for the distribution is then:
+
+$$
+F(x) = 1-e^{1-e^{\lambda x^{\kappa}}}, x > 0 
+$$
+Thus the inverse cdf is:
+
+$$
+F^{-1}(u) = \left[ \frac{1}{\lambda}\text{ln}(1-\text{ln}(1-u))\right]^{1/\kappa}, 0<u<1
+$$
+
+With the inverse cdf, we can first sample points from $\text{Unif}(0,1)$ and then evaluate them in the inverse cdf to get the original distribution.
+
+```{r, Inverse Transform Method}
+set.seed(17)
+n <- 10000
+u <- runif(n)
+lambda <- 2
+kappa <- 1
+
+# function for inverse of cdf of X
+exp_power_inverse <- function(x){
+  ((1/lambda) * log(1-log(1-x)))^kappa
+}
+
+x <- exp_power_inverse(u)
+
+hist(x, breaks = seq(0,round(max(x),1) + 0.1,by = 0.05),
+     main = "Exponential Power: lambda = 2, kappa = 1",
+     yaxt = 'n',
+     col = "orange")
+```
+
+The main difficulty was making the histogram for the distribution. Since we're modeling points from a distribution, the chance of a value being incredible large from the rest isn't zero. Before setting the seed, running the code multiple times revealed outliers in the sampled values, values larger than six, unusual for this distribution. Setting a seed value helped since I only had to consider one case, but to mitigate the issue in general I set the x-axis for the histogram to be slightly larger than `max(x)`. Depending on the seed value for the code block a large value in x could distort the histogram, but that wasn't the case for the seed value above. 
+
+### Acceptance-Rejection Method
+
+Given two random variables X and Y with corresponding distributions $f$ and $g$, if there exists a constant $c$ such that:
+
+$$
+\frac{f(t)}{g(t)} \leq c \text{ for all t such that } f(t) > 0
+$$
+
+The acceptance-rejection method can be applied to generate values for X. The process for the method is:
+1. Find a random variable Y with distribution $g$ that satisfies the conditions above
+2. Repeat until desired number of sampled values for X is met:
+  a. Generate a random value y from $g$
+  b. Generate a random value from $U \sim \text{Unif}(0,1)$
+  c. If $u < f(y)/(cg(y))$, accept y (x = y). Otherwise, reject it.
+  
+According to Maria L. Rizzo, it takes on average $cn$ (n is desired sample size) iterations to achieve n samples for X. Thus choosing the right distribution for Y and a small $c$ is crucial to reducing the method's computational cost. 
+
+I chose to sample points from the Muth distribution, specifically Muth($\kappa$ = 1). The acceptance-rejection method requires calculating the maximum of the distribution which can be tedious or analytically impossible. While easy using calculators, I wanted to use a distribution where the maximum could be calculated analytically.
+
+The probability density function for $X \sim Muth(1)$ is $f_X(x) = (e^x - 1)e^{[-e^x+x+1]}$. I'll chose $Y \sim \text{Exp}(1)$. Then,
+
+$$
+\frac{f(t)}{g(t)} = e^tf(t) = e^t(e^t - 1)e^{(-e^t+t+1)} = e^{-e^t+3t+1}-e^{-e^t+2t+1}
+$$
+
+Solving for when the derivative of $\frac{f(t)}{g(t)}$ equals zero yields:
+
+$$
+\begin{align*}
+\frac{d}{dt}\left(\frac{f(t)}{g(t)}\right) &= (3-e^t)e^{-e^t+3t+1} - (2-e^t)e^{-e^t+2t+1} = 0 \\
+&\iff (3-e^t)e^te^{-e^t+2t+1}-(2-e^t)e^{-e^t+2t+1} = 0 \\
+&\iff 3e^t - e^{2t} - 2 + e^t = 0 \\
+&\iff z^2 - 4z + 2 = 0, \text{ where } z = e^t \\
+&\iff e^t = 2 \pm \sqrt2 \\
+&\iff t = \text{ln}(2 \pm \sqrt2)
+\end{align*}
+$$
+Since $\text{ln}(2-\sqrt2)$ is outside of the support of both distributions, the maximum occurs at $t = \text{ln}(2 + \sqrt2) = 1.2279471773$. Thus the maximum of $\frac{f(t)}{g(t)}$ and appropriate values for c are greater than or equal to 2.51696643123 (to avoid a rounding issue I set c = 2.51696643124). 
+
+```{r, Acceptance-Rejection Method}
+set.seed(5)
+n <- 10000
+k <- 0 # counter for accepted values
+j <- 0 # counter for total values tried
+x <- numeric(10000)
+f <- function(x){
+  exp(x)*(exp(x) - 1)*(exp(-exp(x) + x + 1))
+}
+
+while (k < n){
+  u <- runif(1)
+  y <- rexp(1)
+  j <- j + 1
+  if (f(y) > 2.51696643124*u){
+    k <- k + 1
+    x[k] <- y
+  }
+}
+
+hist(x, breaks = seq(0,round(max(x),1) + 0.1,by = 0.05),
+     main = "Muth Distribution: kappa = 1",
+     ylab = "Frequency",
+     yaxt = 'n',
+     col = "pink")
+```
+
+The main challenge was finding the right distribution for $Y$. My initial distribution was $Unif(0,1)$, which allowed for c = 1 (or even less since the maximum of f is about 0.84). However, the support of the uniform distribution is only $0 \leq x \leq 1$, so the histogram would only reflect the distribution for $0 \leq x \leq 1$. Since the distribution was based on exponential distributions, my next idea was to use the exponential, which produced better results since its support matches that of the Muth distribution.
+
+### Transformation of Variables 
+
+The transformation method relies on the distributions of random variables to sample new distributions by using algebraic transformations via multiplication, division, composition of random variables, etc. A simple example is $Z \sim N(0,1) \implies V = Z^2 \sim \chi^2(1)$ and a more complicated example is $U,V \sim^{iid} \text{Unif}(0,1) \implies Z_1 = \sqrt{-2\text{log}U}\text{cos}(2\pi V) \sim N(0,1)$. 
+
+I chose to apply the transformation method to the beta binomial distribution. I chose this distribution because it required a composition of distributions, not just adding or multiplying distributions.
+
+While the composition of functions makes the example slightly more difficult, the process of sampling values requires:
+1. sampling a p-value from a beta distribution
+2. sampling a value from a beta distribution using the p-value from the last step
+
+```{r, Transformation Method}
+set.seed(17)
+
+samples <- 10000 # number of samples
+trials <- 10
+shape1 <- 2
+shape2 <- 2
+
+values <- c()
+for (i in 1:samples){
+  p <- rbeta(1, shape1, shape2) # sample the p-value from the beta distribution
+  value <- rbinom(1, trials, p)
+  values[i] <- value
+}
+
+hist(values, breaks = seq(-0.5, trials + 0.5, by = 1),
+     main = "Beta-Binomial Distribution",
+     ylab = "Frequency",
+     yaxt = 'n',
+     col = "blue")
+```
+
+One of the initial difficulties was using sampled p values from the beta distribution when sampling from the binomial distribution. My original approach wasn't using a loop to sample one p value and use it to sample one binomial value, but using one vector of p-values generated all at once to then sample binomial values. Trying to do so proved to be challenging, so I opted for the loop approach and it worked. A second, smaller challenge was properly displaying the results. Constricting the breaks in the histogram to `seq(0,trials)` distorted the results towards the ends so adding 0.5 to both sides on the breaks made the histogram shape look more like the actual distribution. 
+
+### References
+1. Leemis, Larry. “Univariate Distribution Relationship Chart.” Wm.edu, 2023, www.math.wm.edu/~leemis/chart/UDR/UDR.html. 
+2. Rizzo, Maria L. Statistical Computing with R. CRC Press, 15 Nov. 2007.
