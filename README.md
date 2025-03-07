@@ -1,11 +1,10 @@
-# P194CS
-Repository containing my work for PSTAT194CS: Computational Statistics &amp; Special Topics
+This repository contains my midterm and final projects from PSTAT194CS: Computational Statistics (Special Topics). The aim of the midterm project was to use different Monte Carlo sampling techniques to computationally sample complex distributions. The aim of the final project (done in a group) was to perform social network analysis on a network found online.
 
 File Descriptions:
 * Final_Project.Rmd: final deliverable for the project, includes specific visuals and analysis
 * Final_Project_Draft_1: similar to previous file, contains incomplete work from the draft phase of our final project
 * Final_Project_Draft_2: contains analysis and scripts from our work on the project
-* MidtermProject.Rmd: personal project assigned as our midterm, contains different Monte Carlo techniques used to sample from complex statistical distributions
+* MidtermProject.Rmd: final file for midterm project
 * Final-Project.pdf: knitted pdf of our final project
 * wikipedia: contains the data used in the final project files. 
   * citing.txt: includes citation to original research for which the data was gathered
