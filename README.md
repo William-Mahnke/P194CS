@@ -10,7 +10,7 @@ File Descriptions:
     * features.json: json file with node features. node features correspond to specific keywords found in each article (represented with the same id number as edges.csv)
     * target.csv: contains the monthly traffic for each article (represented with the same id number as edges.csv)
 * Final_Project.Rmd: final deliverable for the project, includes specific visuals and analysis
-* FinalProjectWriteUp_Group5_Lucas.Rmd: contains analysis and scripts from our work on the project
-* FinalReportWithStuff.Rmd: similar to previous file, contains incomplete work from the draft phase of our final project
+* Final_Project_Draft_1: similar to previous file, contains incomplete work from the draft phase of our final project
+* Final_Project_Draft_2: contains analysis and scripts from our work on the project
 * MidtermProject.Rmd: personal project assigned as our midterm, contains different Monte Carlo techniques used to sample from complex statistical distributions
-* PSTAT194CS-Final-Project---Group-5.Rmd: knitted pdf of our final project
+* Final-Project.pdf: knitted pdf of our final project
